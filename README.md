@@ -41,6 +41,6 @@ python -m snapfolio.cli process --input-dir ./screenshots --output portfolio.xls
 python -m snapfolio.cli process --input-dir ./screenshots --output portfolio.csv
 ```
 
-**理财通**：同一只基金需要「持有中」和「资产详情」各一张截图，放在同一文件夹里一起处理，会自动合并成一行。
+**理财通**：同一只基金需要「持有中」和「资产详情」各一张截图，放在同一文件夹里一起处理，会自动合并成一行。基金代码只在「持有中」页出现；若只放资产详情页，代码列会为空，需手动补上。
 
 **截图建议**：尽量截全整张持仓卡片；裁切严重的图可能识别不全，导出结果里会标 `needs_review`，需人工核对。

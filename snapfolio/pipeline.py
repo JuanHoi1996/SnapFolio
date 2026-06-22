@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from snapfolio.classify import classify
-from snapfolio.document import build_document, parse_fixture
+from snapfolio.document import build_document, parse_fixture, strip_chrome
 from snapfolio.extractors.base import extract_document
 from snapfolio.models import PartialRecord, PositionRecord
 from snapfolio.ocr import run_ocr
@@ -41,6 +41,7 @@ def process_document(doc: Any, source_image: str) -> list[PartialRecord]:
     if result.rejected or result.platform is None:
         raise UnknownPlatformError(result.reason)
 
+    doc = strip_chrome(doc)
     return extract_document(
         doc,
         result.platform,

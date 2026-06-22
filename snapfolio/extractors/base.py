@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from decimal import Decimal
 
 from snapfolio.document import (
@@ -32,7 +33,67 @@ _STRATEGY_REGEX = "regex"
 _STRATEGY_COLUMN = "column"
 
 _TIME_RE = re.compile(r"^\d{1,2}:\d{2}")
-_STATUS_BAR_RE = re.compile(r"^(G\.?l|4G|5G|N@?|38大促|腾讯腾安)$", re.I)
+_CODE_METADATA_RE = re.compile(r"^\d{6}")
+_YESTERDAY_CHANGE_RE = re.compile(r"昨日")
+
+
+def _is_licaitong_ui_chrome(text: str) -> bool:
+    """Chart labels, daily change lines, and section headers — not fund names."""
+    if _YESTERDAY_CHANGE_RE.search(text):
+        return True
+    chrome = (
+        "近1年涨跌幅",
+        "近一年涨跌幅",
+        "业绩表现",
+        "持仓成本",
+        "持仓收益",
+        "持仓收益率",
+        "日涨跌幅",
+        "持有资产",
+        "持有份额",
+        "最新净值",
+        "单位净值",
+        "腾讯腾安",
+        "持有中",
+        "讨论区",
+        "已加自选",
+        "交易明细",
+        "收益明细",
+        "累计收益",
+        "定投计划",
+        "一本基金",
+        "一同类平均",
+        "沪深300",
+        "涨跌幅",
+        "版块",
+        "同类平均",
+        "民交易明细",
+    )
+    return any(k in text for k in chrome)
+
+
+def _is_licaitong_name_blacklist(text: str) -> bool:
+    """Licaitong-only fallback filter; not used for other platforms."""
+    if _is_licaitong_ui_chrome(text):
+        return True
+    if any(k in text for k in ("管理人", "限额", "要求", "费率", "定投", "买入")):
+        return True
+    if any(k in text for k in ("详情", "提供", "腾安", "大促", "交易明细")):
+        return True
+    if "净值" in text and "混合" not in text and "基金" not in text:
+        return True
+    return False
+
+
+def _title_cluster_key(text: str) -> str:
+    """Normalize titles so OCR-truncated duplicates cluster together."""
+    chars = re.findall(r"[\u4e00-\u9fffA-Za-z]", text)
+    return "".join(chars[:8])
+
+
+def _starts_with_fund_code(text: str) -> bool:
+    compact = text.strip().replace(" ", "")
+    return bool(_CODE_METADATA_RE.match(compact))
 
 
 def _is_plausible_fund_name(text: str, token: Token) -> bool:
@@ -40,19 +101,63 @@ def _is_plausible_fund_name(text: str, token: Token) -> bool:
         return False
     if _TIME_RE.match(text.strip()):
         return False
-    if _STATUS_BAR_RE.match(text.strip()):
-        return False
     if re.match(r"^[\d\+\-\.,%]+$", text):
         return False
-    if token.y0 < 0.08:
-        return False
-    if any(k in text for k in ("详情", "提供", "腾安", "大促", "交易明细")):
-        return False
-    if any(k in text for k in ("管理人", "限额", "要求", "费率", "定投", "买入")):
-        return False
-    if "净值" in text and "混合" not in text and "基金" not in text:
+    if _starts_with_fund_code(text):
         return False
     return bool(re.search(r"[\u4e00-\u9fffA-Za-z]", text))
+
+
+def _extract_licaitong_name(doc: Document) -> tuple[str | None, bool]:
+    """
+  理财通基金名抽取：
+  - 资产详情页（持有资产）：名称在「由…基金管理…提供」正上方
+  - 基金档案页：导航栏与正文各出现一次（允许 OCR 截断差异）
+  """
+    provider_lines = [
+        t
+        for t in doc.tokens
+        if "提供" in t.text and ("基金" in t.text or "管理" in t.text) and t.y0 < 0.38
+    ]
+    if provider_lines:
+        provider_y = min(t.y0 for t in provider_lines)
+        above = [
+            t
+            for t in doc.tokens
+            if provider_y - 0.14 < t.y0 < provider_y - 0.003
+            and _is_plausible_fund_name(t.text, t)
+            and not _starts_with_fund_code(t.text)
+            and not _is_licaitong_name_blacklist(t.text)
+        ]
+        if above:
+            return max(above, key=lambda t: (len(t.text), -t.y0)).text.strip(), False
+
+    upper = [
+        t
+        for t in doc.tokens
+        if 0.06 < t.y0 < 0.42
+        and _is_plausible_fund_name(t.text, t)
+        and not _starts_with_fund_code(t.text)
+        and not _is_licaitong_name_blacklist(t.text)
+    ]
+    if not upper:
+        return None, False
+
+    exact_counts = Counter(t.text.strip() for t in upper)
+    for text, count in sorted(exact_counts.items(), key=lambda x: (-x[1], -len(x[0]))):
+        if count >= 2:
+            return text, False
+
+    cluster_counts = Counter(_title_cluster_key(t.text) for t in upper)
+    for key, count in sorted(cluster_counts.items(), key=lambda x: (-x[1], -len(x[0]))):
+        if count >= 2 and len(key) >= 4:
+            variants = [t for t in upper if _title_cluster_key(t.text) == key]
+            return max(variants, key=lambda t: len(t.text)).text.strip(), False
+
+    fallback = [t for t in upper]
+    if not fallback:
+        return None, False
+    return max(fallback, key=lambda t: (len(t.text), -t.y0)).text.strip(), True
 
 
 def _page_text(tokens: list[Token]) -> str:
@@ -167,9 +272,11 @@ class DetailExtractor:
 
         for field_name, spec in config.fields.items():
             if spec.is_name:
-                name = self._extract_name(doc, config, spec, page_id)
+                name, needs_review = self._extract_name(doc, config, spec, page_id)
                 if name:
                     record.name = name
+                if needs_review and "needs_review" not in record.flags:
+                    record.flags.append("needs_review")
                 continue
             if spec.is_code:
                 code = self._extract_code(doc)
@@ -192,26 +299,11 @@ class DetailExtractor:
         record.confidence = self._aggregate_confidence(record)
         return [record]
 
-    def _extract_name(self, doc: Document, config: PlatformConfig, spec: FieldSpec, page_id: str | None = None) -> str | None:
-        if page_id == "holding" and config.platform_id == "tencent_licaitong":
-            title_candidates = [
-                t
-                for t in doc.tokens
-                if 0.12 < t.y0 < 0.35
-                and _is_plausible_fund_name(t.text, t)
-                and ("混合" in t.text or "基金" in t.text or "股票" in t.text or "QDII" in t.text.upper())
-            ]
-            if title_candidates:
-                title_candidates.sort(key=lambda t: (-len(t.text), t.y0))
-                return title_candidates[0].text.strip()
-
-            for tok in doc.tokens:
-                code = extract_code(tok.text)
-                if not code or tok.y0 > 0.35:
-                    continue
-                name = re.sub(r"\d{6}.*", "", tok.text).strip(" 【(（")
-                if _is_plausible_fund_name(name, tok):
-                    return name
+    def _extract_name(
+        self, doc: Document, config: PlatformConfig, spec: FieldSpec, page_id: str | None = None
+    ) -> tuple[str | None, bool]:
+        if config.platform_id == "tencent_licaitong":
+            return _extract_licaitong_name(doc)
 
         if spec.labels:
             anchor = doc.find_tokens_containing(spec.labels[0])
@@ -225,7 +317,7 @@ class DetailExtractor:
                 below.sort(key=lambda t: t.y0)
                 for tok in below:
                     if _is_plausible_fund_name(tok.text, tok):
-                        return tok.text.strip()
+                        return tok.text.strip(), False
 
         candidates = [
             t
@@ -234,13 +326,13 @@ class DetailExtractor:
             and not any(l in t.text for l in ("持有资产", "持有份额", "最新净值", "基金净值"))
         ]
         if not candidates:
-            return None
+            return None, False
         # Prefer longer Chinese names in the upper content area (skip chart/footer).
         candidates = [t for t in candidates if t.y0 < 0.55]
         if not candidates:
-            return None
+            return None, False
         candidates.sort(key=lambda t: (-len(t.text), t.y0))
-        return candidates[0].text.strip()
+        return candidates[0].text.strip(), False
 
     def _extract_code(self, doc: Document) -> str | None:
         upper_tokens = [t for t in doc.tokens if t.y0 < 0.4]

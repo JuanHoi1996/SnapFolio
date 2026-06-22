@@ -204,6 +204,58 @@ def tokens_right_of(tokens: list[Token], x: float, max_x: float | None = None) -
     return sorted(result, key=lambda t: (t.cy, t.x0))
 
 
+_TOP_CHROME_Y = 0.05
+_FOOTER_CHROME_Y = 0.92
+
+_CHROME_TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
+_CHROME_STATUS_RE = re.compile(r"^(G\.?l|4G|5G|N@?|38大促|腾讯腾安)$", re.I)
+_CHROME_BATTERY_RE = re.compile(r"^\d{1,3}%?$")
+
+_FOOTER_TAB_KEYWORDS = (
+    "讨论区",
+    "已加自选",
+    "对比",
+    "PK",
+    "定投",
+    "买入",
+    "取出",
+    "卖出",
+    "赎回",
+    "转换",
+    "更多",
+)
+
+
+def _is_top_status_chrome(token: Token) -> bool:
+    if token.y0 >= _TOP_CHROME_Y:
+        return False
+    text = token.text.strip()
+    if _CHROME_TIME_RE.match(text):
+        return True
+    if _CHROME_STATUS_RE.match(text):
+        return True
+    if _CHROME_BATTERY_RE.match(text):
+        return True
+    return False
+
+
+def _is_footer_tab_chrome(token: Token) -> bool:
+    if token.y0 <= _FOOTER_CHROME_Y:
+        return False
+    text = token.text.strip()
+    return any(k in text for k in _FOOTER_TAB_KEYWORDS)
+
+
+def strip_chrome(doc: Document) -> Document:
+    """Remove global status-bar and footer-tab tokens; keep business content intact."""
+    kept = [
+        t
+        for t in doc.tokens
+        if not _is_top_status_chrome(t) and not _is_footer_tab_chrome(t)
+    ]
+    return Document(kept, doc.image_width, doc.image_height, doc.source_path)
+
+
 def parse_fixture(path: str | Path) -> Document:
     """
     Load a fixture file: header '# image: WxH' then 'x0,y0,x1,y1\\tconf\\ttext' lines.
