@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Local data & output
+testset/
+output/
+screenshots/
+
+# Tests (local only)
+tests/
+.pytest_cache/
+
+# Temp / debug
+_diag*.txt
+_tokens.txt
+_licaitong_diag.txt
+.env
