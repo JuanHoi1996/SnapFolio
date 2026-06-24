@@ -29,6 +29,17 @@ pip install -e .
 
 ## 使用
 
+### Web 界面（推荐）
+
+```bash
+pip install streamlit
+streamlit run app.py
+```
+
+浏览器打开 `http://localhost:8501`，上传截图后点击「开始识别」，可预览表格并下载 Excel/CSV。本地调通后再部署到 [Streamlit Cloud](https://streamlit.io/cloud)。
+
+### 命令行
+
 把截图放进一个文件夹，例如 `screenshots/`，然后：
 
 ```bash
