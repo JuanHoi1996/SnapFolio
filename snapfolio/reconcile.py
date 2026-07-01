@@ -18,7 +18,11 @@ def normalize_name(name: str | None) -> str:
         return ""
     s = re.sub(r"\s+", "", name)
     s = re.sub(r"[^\w\u4e00-\u9fff]", "", s)
-    return s.lower()
+    s = s.lower()
+    # QDI vs QDII OCR variants (e.g. 理财通 holding vs detail page)
+    s = re.sub(r"qdil", "qdii", s)
+    s = re.sub(r"qdi(?!i)", "qdii", s)
+    return s
 
 
 def _is_weak_name(name: str | None) -> bool:

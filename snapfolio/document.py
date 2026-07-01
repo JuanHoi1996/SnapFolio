@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from snapfolio.ocr_normalize import normalize_ocr_text
+
 
 @dataclass
 class Token:
@@ -85,7 +87,7 @@ def build_document(
         if not text or not text.strip():
             continue
         x0, y0, x1, y1 = normalize_bbox(bbox, width, height)
-        tokens.append(Token(text.strip(), x0, y0, x1, y1, float(conf)))
+        tokens.append(Token(normalize_ocr_text(text.strip()), x0, y0, x1, y1, float(conf)))
     return Document(tokens, width, height, source_path)
 
 
