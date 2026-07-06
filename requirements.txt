@@ -1,4 +1,6 @@
-rapidocr-onnxruntime>=1.3.0
+# Headless OpenCV for Linux servers; install before rapidocr (drop-in cv2, no libgthread).
+opencv-python-headless>=4.8.0,<5
+rapidocr-onnxruntime>=1.3.0,<1.5
 pandas>=2.0.0
 openpyxl>=3.1.0
 Pillow>=10.0.0

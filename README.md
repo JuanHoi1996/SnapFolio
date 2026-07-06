@@ -38,7 +38,7 @@ streamlit run app.py
 
 浏览器打开 `http://localhost:8501`，上传截图后点击「开始识别」，可预览表格并下载 Excel/CSV。本地调通后再部署到 [Streamlit Cloud](https://streamlit.io/cloud)。
 
-仓库根目录的 `packages.txt` 会在云端安装 `libgl1`（RapidOCR / OpenCV 在 Linux 上需要）。推送后请在 Streamlit Cloud 控制台 **Reboot app**，等依赖重新构建完成再试识别。
+仓库根目录的 `packages.txt` 会在云端安装 `libgl1`、`libglib2.0-0`（RapidOCR / OpenCV 在 Linux 上需要）；`requirements.txt` 使用 `opencv-python-headless` 避免 GUI 依赖。推送后请在 Streamlit Cloud 控制台 **Reboot app**（不是 Rerun），等依赖重新构建完成再试识别。
 
 ### 命令行
 
