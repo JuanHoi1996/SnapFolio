@@ -1,4 +1,4 @@
-# Headless OpenCV for Linux servers; install before rapidocr (drop-in cv2, no libgthread).
+# opencv-python-headless first: drop-in cv2 for servers, avoids libgthread when uv keeps it.
 opencv-python-headless>=4.8.0,<5
 rapidocr-onnxruntime>=1.3.0,<1.5
 pandas>=2.0.0
