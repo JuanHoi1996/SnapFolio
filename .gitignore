@@ -9,8 +9,12 @@ build/
 
 # Local data & output
 testset/
+testset2/
+minimaltestset/
 output/
 screenshots/
+ocr_audit/
+**/ocr_audit/
 
 # Tests (local only)
 tests/
