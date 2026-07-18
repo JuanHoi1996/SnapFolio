@@ -6,8 +6,9 @@ __pycache__/
 venv/
 dist/
 build/
+.pytest_cache/
 
-# Local data & output
+# Local data & runtime output (not part of the app)
 testset/
 testset2/
 minimaltestset/
@@ -15,13 +16,19 @@ output/
 screenshots/
 ocr_audit/
 **/ocr_audit/
+*.xls
+*.xlsx
+*.zip
 
-# Tests (local only)
-tests/
-.pytest_cache/
+# Secrets / editor / OS junk
+.env
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
 
-# Temp / debug
+# Temp / debug dumps
 _diag*.txt
 _tokens.txt
 _licaitong_diag.txt
-.env
+_verify*.txt
