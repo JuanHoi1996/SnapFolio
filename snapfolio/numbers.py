@@ -12,6 +12,8 @@ _INLINE_NUMERIC = re.compile(
 _INLINE_CODE_SUFFIX = re.compile(r"^(?P<name>.+?)(?P<code>\d{6})[>》\s]*$")
 _CODE_IN_TEXT = re.compile(r"(?:SH|SZ|sh|sz)?\s*0*(\d{6})")
 _SIX_DIGIT = re.compile(r"\d{6}")
+# Trailing NAV date like (02-13) / （02-13）; OCR may mix half/full-width parens.
+_DATE_SUFFIX = re.compile(r"[(\uFF08]\s*[\d\-]+\s*[)\uFF09]\s*$")
 
 
 def normalize_numeric_text(text: str) -> str:
@@ -60,8 +62,7 @@ def extract_inline_value(token_text: str, label: str) -> Decimal | None:
         return None
 
     remainder = text[len(label) :]
-    # Strip trailing date suffix like (02-13)
-    remainder = re.sub(r"\([\d\-]+\)$", "", remainder)
+    remainder = _DATE_SUFFIX.sub("", remainder)
     return parse_decimal(remainder)
 
 
@@ -81,7 +82,7 @@ def extract_code(text: str) -> str | None:
     if not text:
         return None
 
-    m = _CODE_IN_TEXT.search(text.replace(" ", ""))
+    m = _CODE_IN_TEXT.search(re.sub(r"\s+", "", text))
     if m:
         return m.group(1)
 
@@ -110,5 +111,5 @@ def extract_name_code_from_merged(text: str) -> tuple[str | None, str | None]:
 
 def parse_nav_with_date(text: str) -> Decimal | None:
     """Parse unit price that may include a date suffix: '1.4465(02-13)'."""
-    cleaned = re.sub(r"\([\d\-]+\)$", "", text.strip())
+    cleaned = _DATE_SUFFIX.sub("", text.strip())
     return parse_decimal(cleaned)

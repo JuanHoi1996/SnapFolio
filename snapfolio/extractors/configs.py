@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Literal
+
+from snapfolio.models import PartialRecord
 
 Archetype = Literal["list", "detail"]
 
@@ -56,6 +59,8 @@ CMB_STOCK = PlatformConfig(
     pages=[
         PageConfig(
             page_id="holdings",
+            # Empty primary signature is intentional: all([]) is True, so matching
+            # relies entirely on signature_any_of ("我的股票" OR "持仓数").
             signature=(),
             signature_any_of=("我的股票", "持仓数"),
         ),
@@ -69,6 +74,8 @@ CMB_STOCK = PlatformConfig(
         "amount": FieldSpec(
             labels=("持仓市值",),
             inline_first=True,
+            # Values sit under column headers, not to the right of the label.
+            direction="below",
         ),
         "quantity": FieldSpec(
             labels=("持仓数",),
@@ -233,3 +240,8 @@ PLATFORM_CONFIGS: list[PlatformConfig] = [
 ]
 
 PLATFORM_BY_ID: dict[str, PlatformConfig] = {p.platform_id: p for p in PLATFORM_CONFIGS}
+
+_VALID_FIELDS = {f.name for f in dataclasses.fields(PartialRecord)}
+for _cfg in PLATFORM_CONFIGS:
+    for _key in _cfg.fields:
+        assert _key in _VALID_FIELDS, f"{_cfg.platform_id}: unknown field {_key!r}"

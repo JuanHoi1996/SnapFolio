@@ -20,7 +20,7 @@ def _match_signature(doc: Document, sig: tuple[str, ...], any_of: tuple[str, ...
     if any_of:
         if not doc.has_any_of(*any_of):
             return False
-    return doc.has_any(*sig)
+    return doc.has_all(*sig)
 
 
 def classify(doc: Document) -> ClassificationResult:

@@ -31,10 +31,25 @@ _STRATEGY_INLINE = "inline"
 _STRATEGY_SPATIAL = "spatial"
 _STRATEGY_REGEX = "regex"
 _STRATEGY_COLUMN = "column"
+_STRATEGY_DERIVED = "derived"
 
 _TIME_RE = re.compile(r"^\d{1,2}:\d{2}")
 _CODE_METADATA_RE = re.compile(r"^\d{6}")
 _YESTERDAY_CHANGE_RE = re.compile(r"昨日")
+_ALIPAY_LABEL_BLACKLIST = (
+    "持有份额",
+    "基金净值",
+    "金额(元)",
+    "金额（元）",
+    "持有金额",
+    "资产详情",
+)
+
+
+def _looks_like_pnl_or_ratio(text: str) -> bool:
+    """True for signed P/L or percentage tokens that must not be market value."""
+    s = text.strip()
+    return bool(s) and (s.startswith(("+", "-", "＋", "－")) or "%" in s)
 
 
 def _is_licaitong_ui_chrome(text: str) -> bool:
@@ -92,7 +107,7 @@ def _title_cluster_key(text: str) -> str:
 
 
 def _starts_with_fund_code(text: str) -> bool:
-    compact = text.strip().replace(" ", "")
+    compact = re.sub(r"\s+", "", text)
     return bool(_CODE_METADATA_RE.match(compact))
 
 
@@ -205,15 +220,17 @@ def resolve_field(
                         if nav is not None:
                             return _obs(nav, 0.85, _STRATEGY_INLINE, tok)
 
-    for label in labels:
-        for tok in tokens:
-            if tok.text.strip() == label or tok.text.startswith(label):
-                neighbor = numeric_token_right_of(tok, tokens, max_dx=max_distance)
-                if neighbor:
-                    text = neighbor.text
-                    parsed = parse_nav_with_date(text) if parse_nav_date else parse_decimal(text)
-                    if parsed is not None:
-                        return _obs(parsed, 0.8, _STRATEGY_SPATIAL, neighbor)
+    # Same-row "to the right" shortcut only when searching sideways.
+    if direction in ("right", "either"):
+        for label in labels:
+            for tok in tokens:
+                if tok.text.strip() == label or tok.text.startswith(label):
+                    neighbor = numeric_token_right_of(tok, tokens, max_dx=max_distance)
+                    if neighbor:
+                        text = neighbor.text
+                        parsed = parse_nav_with_date(text) if parse_nav_date else parse_decimal(text)
+                        if parsed is not None:
+                            return _obs(parsed, 0.8, _STRATEGY_SPATIAL, neighbor)
 
     spatial_direction = "either" if direction == "either" else direction
     for label in labels:
@@ -323,7 +340,7 @@ class DetailExtractor:
             t
             for t in doc.tokens
             if _is_plausible_fund_name(t.text, t)
-            and not any(l in t.text for l in ("持有资产", "持有份额", "最新净值", "基金净值"))
+            and not any(l in t.text for l in _ALIPAY_LABEL_BLACKLIST)
         ]
         if not candidates:
             return None, False
@@ -335,12 +352,12 @@ class DetailExtractor:
         return candidates[0].text.strip(), False
 
     def _extract_code(self, doc: Document) -> str | None:
-        upper_tokens = [t for t in doc.tokens if t.y0 < 0.4]
-        for tok in upper_tokens:
-            code = extract_code(tok.text)
-            if code:
-                return code
-        for tok in doc.tokens:
+        # Prefer upper-screen codes only. A full-document fallback would treat
+        # date fragments (e.g. 20250213 -> 202502) as security codes and can
+        # silently poison reconcile merges. Empty is better than fabricated.
+        for tok in sorted(doc.tokens, key=lambda t: t.y0):
+            if tok.y0 >= 0.4:
+                break
             code = extract_code(tok.text)
             if code:
                 return code
@@ -423,17 +440,27 @@ class ListExtractor:
                     spec.labels,
                     fallback_labels=spec.fallback_labels,
                     inline_first=spec.inline_first,
+                    direction=spec.direction,
+                    max_distance=spec.max_distance,
                     scope_tokens=scope,
                 )
                 if obs and field_name == "amount":
                     val = obs.value
                     if isinstance(val, Decimal) and (val < Decimal("100") or val < 0):
                         obs = None
+                    elif isinstance(val, Decimal):
+                        # Reject if the matched number came from a signed / % token.
+                        for t in scope:
+                            if parse_decimal(t.text) == val and _looks_like_pnl_or_ratio(t.text):
+                                obs = None
+                                break
                 if obs:
                     setattr(record, field_name, obs)
 
             if record.amount is None:
-                for tok in scope:
+                for tok in sorted(scope, key=lambda t: (t.y0, t.x0)):
+                    if _looks_like_pnl_or_ratio(tok.text):
+                        continue
                     val = parse_decimal(tok.text)
                     if val is None or val < Decimal("1000"):
                         continue
@@ -494,7 +521,8 @@ class ListExtractor:
             ]
             if not name_candidates:
                 continue
-            name = max(name_candidates, key=lambda t: t.y1).text.strip()
+            name_tok = max(name_candidates, key=lambda t: t.y1)
+            name = name_tok.text.strip()
 
             y_end = code_tok.y1 + 0.055
             next_names = [
@@ -509,18 +537,24 @@ class ListExtractor:
             if next_names:
                 y_end = min(y_end, min(next_names) - 0.005)
 
-            band = tokens_in_y_band(doc.tokens, name_candidates[0].y0 - 0.005, y_end)
+            band = tokens_in_y_band(doc.tokens, name_tok.y0 - 0.005, y_end)
 
             amount: Decimal | None = None
             quantity: Decimal | None = None
             unit_price: Decimal | None = None
+            qty_strategy = price_strategy = amount_strategy = _STRATEGY_COLUMN
             price_candidates: list[tuple[float, Decimal]] = []
             left_integers: list[Decimal] = []
 
             for tok in band:
                 if any(k in tok.text for k in ("%", "SH", "SZ", "盈亏")):
                     continue
-                if re.fullmatch(r"0?\d{6}", tok.text.replace(" ", "")):
+                if _looks_like_pnl_or_ratio(tok.text):
+                    continue
+                # Headers like 证券/代码(4) must not become quantity via digit stripping.
+                if re.search(r"[\u4e00-\u9fff]", tok.text):
+                    continue
+                if re.fullmatch(r"0?\d{6}", re.sub(r"\s+", "", tok.text)):
                     continue
                 val = parse_decimal(tok.text)
                 if val is None:
@@ -549,13 +583,17 @@ class ListExtractor:
                     quantity = left_integers[0]
 
             if price_candidates:
-                price_candidates.sort(key=lambda x: x[0])
-                unit_price = price_candidates[0][1]
+                unit_price = min(price_candidates, key=lambda p: p[0])[1]
 
             if quantity and amount and unit_price is None and quantity > 0:
-                unit_price = amount / quantity
+                unit_price = (amount / quantity).quantize(Decimal("0.001"))
+                price_strategy = _STRATEGY_DERIVED
             if quantity and unit_price and amount is None:
                 amount = quantity * unit_price
+                amount_strategy = _STRATEGY_DERIVED
+            if amount and unit_price and quantity is None and unit_price > 0:
+                quantity = (amount / unit_price).quantize(Decimal("1"))
+                qty_strategy = _STRATEGY_DERIVED
 
             record = PartialRecord(
                 asset_type=config.asset_type,
@@ -566,11 +604,11 @@ class ListExtractor:
                 page_id=page_id,
             )
             if amount is not None:
-                record.amount = _obs(amount, 0.85, _STRATEGY_COLUMN)
+                record.amount = _obs(amount, 0.85, amount_strategy)
             if quantity is not None:
-                record.quantity = _obs(quantity, 0.85, _STRATEGY_COLUMN)
+                record.quantity = _obs(quantity, 0.85, qty_strategy)
             if unit_price is not None:
-                record.unit_price = _obs(unit_price, 0.85, _STRATEGY_COLUMN)
+                record.unit_price = _obs(unit_price, 0.85, price_strategy)
 
             record.confidence = DetailExtractor()._aggregate_confidence(record)
             records.append(record)

@@ -50,10 +50,16 @@ class Document:
     def find_tokens_containing(self, needle: str) -> list[Token]:
         return [t for t in self.tokens if t.contains_text(needle)]
 
-    def has_any(self, *needles: str) -> bool:
+    def has_all(self, *needles: str) -> bool:
+        """True iff every needle appears in at least one token (AND semantics)."""
         return all(any(t.contains_text(n) for t in self.tokens) for n in needles)
 
+    def has_any(self, *needles: str) -> bool:
+        """Deprecated alias for has_all — name historically mismatched AND semantics."""
+        return self.has_all(*needles)
+
     def has_any_of(self, *needles: str) -> bool:
+        """True iff at least one needle appears in some token (OR semantics)."""
         return any(any(t.contains_text(n) for t in self.tokens) for n in needles)
 
     def median_token_height(self) -> float:
