@@ -510,19 +510,24 @@ class ListExtractor:
             if not code:
                 continue
 
+            # Long names wrap to 2+ lines; keep a taller window and join fragments.
             name_candidates = [
                 t
                 for t in doc.tokens
                 if t.y0 < code_tok.y0
-                and t.y0 >= code_tok.y0 - 0.06
+                and t.y0 >= code_tok.y0 - 0.10
                 and t.x0 < 0.35
                 and re.search(r"[\u4e00-\u9fff]", t.text)
                 and not extract_code(t.text)
+                and not any(
+                    k in t.text for k in ("证券", "代码", "市值", "股数", "现价", "成本", "盈亏")
+                )
             ]
             if not name_candidates:
                 continue
-            name_tok = max(name_candidates, key=lambda t: t.y1)
-            name = name_tok.text.strip()
+            name_candidates.sort(key=lambda t: t.y0)
+            name = "".join(t.text.strip() for t in name_candidates)
+            name_top = name_candidates[0]
 
             y_end = code_tok.y1 + 0.055
             next_names = [
@@ -532,12 +537,12 @@ class ListExtractor:
                 and t.x0 < 0.35
                 and re.search(r"[\u4e00-\u9fff]", t.text)
                 and not extract_code(t.text)
-                and t.text.strip() != name
+                and t.text.strip() not in {c.text.strip() for c in name_candidates}
             ]
             if next_names:
                 y_end = min(y_end, min(next_names) - 0.005)
 
-            band = tokens_in_y_band(doc.tokens, name_tok.y0 - 0.005, y_end)
+            band = tokens_in_y_band(doc.tokens, name_top.y0 - 0.005, y_end)
 
             amount: Decimal | None = None
             quantity: Decimal | None = None

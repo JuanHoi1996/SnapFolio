@@ -50,6 +50,26 @@ def test_wesee_rejects_signed_pnl_as_unit_price() -> None:
     assert rec.unit_price.strategy == _STRATEGY_COLUMN
 
 
+def test_wesee_joins_wrapped_security_name() -> None:
+    """Long names wrap onto a second line; both fragments must become one name."""
+    tokens = _wesee_base_headers() + [
+        _tok("半导体龙头ETF", 0.05, 0.74),
+        _tok("工银", 0.05, 0.77),
+        _tok("159665", 0.08, 0.81),
+        _tok("1,261.50", 0.38, 0.74),
+        _tok("500", 0.38, 0.81),
+        _tok("2.523", 0.62, 0.74),
+        _tok("2.400", 0.62, 0.81),
+    ]
+    doc = Document(tokens=tokens, image_width=1080, image_height=1920)
+    records = ListExtractor().extract(doc, TENCENT_WESEE, "wesee.png", "holdings")
+    assert len(records) == 1
+    rec = records[0]
+    assert rec.code == "159665"
+    assert rec.name == "半导体龙头ETF工银"
+    assert rec.quantity is not None and rec.quantity.value == Decimal("500")
+
+
 def test_wesee_band_uses_selected_name_token_not_ocr_order() -> None:
     """Header '证券/代码(4)' must not become the band origin / quantity."""
     tokens = _wesee_base_headers() + [
